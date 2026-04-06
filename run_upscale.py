@@ -89,7 +89,7 @@ def build_seedvr2_workflow(
         "1": {
             "inputs": {
                 "model": DIT_MODEL,
-                "device": "cuda",
+                "device": "cuda:0",
             },
             "class_type": "SeedVR2LoadDiTModel",
         },
@@ -97,7 +97,7 @@ def build_seedvr2_workflow(
         "2": {
             "inputs": {
                 "model": VAE_MODEL,
-                "device": "cuda",
+                "device": "cuda:0",
             },
             "class_type": "SeedVR2LoadVAEModel",
         },
@@ -144,7 +144,6 @@ def build_seedvr2_workflow(
                 "pingpong": False,
                 "save_output": True,
                 "images": ["4", 0],
-                "audio": ["3", 1],
             },
             "class_type": "VHS_VideoCombine",
         },
@@ -322,8 +321,12 @@ def main():
         if result["status"] == "COMPLETED":
             output = result["output"]
             videos = output.get("videos", [])
-            if videos:
-                video_data = videos[-1]["data"]
+            images = output.get("images", [])
+            all_outputs = videos or images
+
+            if all_outputs:
+                item = all_outputs[-1]
+                video_data = item["data"]
                 output_path = jobs[shot_name]["output_path"]
                 with open(output_path, "wb") as f:
                     f.write(base64.b64decode(video_data))
@@ -335,7 +338,8 @@ def main():
                     total_time = sum(timings.values())
                     print(f"    Node processing: {total_time:.1f}s")
             else:
-                print(f"  {shot_name}: no video in output")
+                print(f"  {shot_name}: no output found. Keys: {list(output.keys())}")
+                print(f"    Full output: {json.dumps(output)[:500]}")
                 failed += 1
         else:
             failed += 1
