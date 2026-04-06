@@ -1,10 +1,10 @@
 # Base image — ComfyUI + RunPod serverless handler pre-installed
 FROM runpod/worker-comfyui:latest-base
 
-# Pin to exact ComfyUI version
+# Update ComfyUI to latest (SeedVR2 requires V3 API)
 RUN cd /comfyui && \
     git fetch origin && \
-    git checkout ed7c2c65
+    git checkout origin/master
 
 # —— Custom Nodes ——————————————————————————————————————————————————————————————
 

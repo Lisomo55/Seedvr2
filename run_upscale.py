@@ -26,6 +26,7 @@ try:
 except ImportError:
     pass
 
+import subprocess
 import requests
 
 # --- Config ---
@@ -43,6 +44,18 @@ UPSCALED_DIR = os.path.join(PROJECT_DIR, "video_upscaled")
 # SeedVR2 model filenames
 DIT_MODEL = "seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors"
 VAE_MODEL = "ema_vae_fp16.safetensors"
+
+
+def get_video_duration(path: str) -> float:
+    """Get video duration in seconds using ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+            capture_output=True, text=True,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
 
 
 def get_headers():
@@ -75,22 +88,18 @@ def build_seedvr2_workflow(
         # Load DiT model
         "1": {
             "inputs": {
-                "model_name": DIT_MODEL,
+                "model": DIT_MODEL,
                 "device": "cuda",
-                "enable_blockswap": False,
-                "blockswap_double": 0,
-                "blockswap_single": 0,
             },
-            "class_type": "SeedVR2 (Down)Load DiT Model",
+            "class_type": "SeedVR2LoadDiTModel",
         },
         # Load VAE
         "2": {
             "inputs": {
-                "vae_name": VAE_MODEL,
-                "vae_tile_size": 256,
-                "vae_tile_stride": 192,
+                "model": VAE_MODEL,
+                "device": "cuda",
             },
-            "class_type": "SeedVR2 (Down)Load VAE Model",
+            "class_type": "SeedVR2LoadVAEModel",
         },
         # Load input video
         "3": {
@@ -110,14 +119,16 @@ def build_seedvr2_workflow(
         "4": {
             "inputs": {
                 "resolution": resolution,
+                "max_resolution": 0,
                 "batch_size": batch_size,
+                "uniform_batch_size": False,
                 "color_correction": color_correction,
                 "seed": seed,
-                "dit_model": ["1", 0],
-                "vae_model": ["2", 0],
-                "images": ["3", 0],
+                "dit": ["1", 0],
+                "vae": ["2", 0],
+                "image": ["3", 0],
             },
-            "class_type": "SeedVR2 Video Upscaler",
+            "class_type": "SeedVR2VideoUpscaler",
         },
         # Save video
         "5": {
@@ -157,6 +168,8 @@ def poll_all_jobs(jobs: dict):
     results = {}
     start = time.time()
     seen_logs = {name: set() for name in jobs}
+    prev_status = {name: None for name in jobs}
+    progress_start = {}  # name -> timestamp when IN_PROGRESS started
 
     while pending and (time.time() - start) < MAX_WAIT_SEC:
         for name in list(pending.keys()):
@@ -170,6 +183,16 @@ def poll_all_jobs(jobs: dict):
                 data = resp.json()
                 status = data.get("status", "UNKNOWN")
 
+                # Track cold start transition
+                if status == "IN_PROGRESS" and prev_status[name] in (None, "IN_QUEUE"):
+                    progress_start[name] = time.time()
+                    cold_start = int(progress_start[name] - start)
+                    print(f"  [{elapsed:4d}s] {name}: IN_PROGRESS (cold start: {cold_start}s)")
+                    prev_status[name] = status
+                    continue
+
+                prev_status[name] = status
+
                 logs = data.get("logs", "").strip()
                 if logs:
                     for line in logs.splitlines():
@@ -178,8 +201,15 @@ def poll_all_jobs(jobs: dict):
                             print(f"  [{elapsed:4d}s] {name}: {line}")
 
                 if status == "COMPLETED":
+                    processing_time = time.time() - progress_start.get(name, start)
+                    cold_time = progress_start.get(name, start) - start
                     print(f"  [{elapsed:4d}s] {name}: COMPLETED")
-                    results[name] = {"status": "COMPLETED", "output": data.get("output", {})}
+                    results[name] = {
+                        "status": "COMPLETED",
+                        "output": data.get("output", {}),
+                        "cold_start_sec": round(cold_time, 1),
+                        "processing_sec": round(processing_time, 1),
+                    }
                     del pending[name]
                 elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
                     error = data.get("error", "Unknown error")
@@ -208,6 +238,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=5, help="Batch size, must follow 4n+1 (1,5,9,13...) (default: 5)")
     parser.add_argument("--color-correction", default="lab", help="Color correction method (default: lab)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--only", nargs="+", help="Only process these shots (e.g. --only shot_1 shot_2)")
     args = parser.parse_args()
 
     if not os.path.isdir(VIDEO_DIR):
@@ -222,6 +253,13 @@ def main():
     if not video_files:
         print(f"Error: No .mp4 files in {VIDEO_DIR}", file=sys.stderr)
         sys.exit(1)
+
+    # Filter if --only specified
+    if args.only:
+        video_files = [f for f in video_files if f.replace(".mp4", "") in args.only]
+        if not video_files:
+            print(f"Error: None of {args.only} found in {VIDEO_DIR}", file=sys.stderr)
+            sys.exit(1)
 
     os.makedirs(UPSCALED_DIR, exist_ok=True)
 
@@ -255,7 +293,8 @@ def main():
         }
 
         file_size = os.path.getsize(video_path)
-        print(f"  {shot_name}: {file_size / 1024:.0f} KB")
+        duration = get_video_duration(video_path)
+        print(f"  {shot_name}: {file_size / 1024:.0f} KB, {duration:.1f}s")
         job_id = submit_job(payload)
 
         if job_id:
@@ -263,6 +302,7 @@ def main():
             jobs[shot_name] = {
                 "job_id": job_id,
                 "output_path": os.path.join(UPSCALED_DIR, f"{shot_name}.mp4"),
+                "duration": duration,
             }
         else:
             print(f"  {shot_name}: FAILED to submit")
@@ -293,12 +333,26 @@ def main():
                 timings = output.get("node_timings", {})
                 if timings:
                     total_time = sum(timings.values())
-                    print(f"    Processing time: {total_time:.1f}s")
+                    print(f"    Node processing: {total_time:.1f}s")
             else:
                 print(f"  {shot_name}: no video in output")
                 failed += 1
         else:
             failed += 1
+
+    # Timing report
+    print(f"\n{'='*55}")
+    print(f"  TIMING REPORT")
+    print(f"  {'Shot':<12} {'Duration':<10} {'Cold':<8} {'Process':<10} {'Per sec'}")
+    print(f"  {'-'*50}")
+    for shot_name, result in sorted(results.items()):
+        if result["status"] == "COMPLETED":
+            dur = jobs[shot_name]["duration"]
+            cold = result.get("cold_start_sec", 0)
+            proc = result.get("processing_sec", 0)
+            per_sec = proc / dur if dur > 0 else 0
+            print(f"  {shot_name:<12} {dur:<10.1f} {cold:<8.1f} {proc:<10.1f} {per_sec:.1f}s/s")
+    print(f"{'='*55}")
 
     print(f"\nDone. {success}/{len(results)} videos upscaled to {UPSCALED_DIR}")
     if failed:
