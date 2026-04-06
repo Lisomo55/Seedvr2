@@ -22,13 +22,18 @@ RUN cd /comfyui/custom_nodes && \
 
 # —— Pre-download Models ——————————————————————————————————————————————————————
 
-# SeedVR2 7B fp8 mixed (block35 fp16) — best quality for 24-32GB GPUs
+# Install wget (not in base image)
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
+# SeedVR2 7B sharp fp8 — sharpest fp8 variant, fits on 24-32GB GPUs
 RUN mkdir -p /comfyui/models/SEEDVR2 && \
-    wget -q https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors \
-        -O /comfyui/models/SEEDVR2/seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors
+    wget --no-verbose --content-disposition \
+        "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors" \
+        -O /comfyui/models/SEEDVR2/seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors
 
 # VAE (required for all configurations)
-RUN wget -q https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/ema_vae_fp16.safetensors \
+RUN wget --no-verbose --content-disposition \
+        "https://huggingface.co/numz/SeedVR2_comfyUI/resolve/main/ema_vae_fp16.safetensors" \
         -O /comfyui/models/SEEDVR2/ema_vae_fp16.safetensors
 
 # —— Custom handler with video output support ————————————————————————————————
