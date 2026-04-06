@@ -42,7 +42,7 @@ VIDEO_DIR = os.path.join(PROJECT_DIR, "video")
 UPSCALED_DIR = os.path.join(PROJECT_DIR, "video_upscaled")
 
 # SeedVR2 model filenames
-DIT_MODEL = "seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors"
+DIT_MODEL = "seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors"
 VAE_MODEL = "ema_vae_fp16.safetensors"
 
 
@@ -106,7 +106,6 @@ def build_seedvr2_workflow(
             "inputs": {
                 "video": video_name,
                 "force_rate": 25,
-                "force_size": "Disabled",
                 "custom_width": 0,
                 "custom_height": 0,
                 "frame_load_cap": 0,

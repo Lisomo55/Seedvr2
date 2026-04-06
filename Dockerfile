@@ -20,10 +20,11 @@ RUN cd /comfyui/custom_nodes && \
     cd ComfyUI-VideoHelperSuite && \
     pip install -r requirements.txt --break-system-packages
 
-# —— Models ————————————————————————————————————————————————————————————————————
-# SeedVR2 node auto-downloads models from HuggingFace on first run
-# (~8.2GB DiT + 478MB VAE, takes ~20s at worker download speeds)
-RUN mkdir -p /comfyui/models/SEEDVR2
+# —— Models via Network Volume ————————————————————————————————————————————————
+# SeedVR2 models dir points to network volume to avoid container disk limits
+# Upload models to /runpod-volume/models/SEEDVR2/ on the network volume
+RUN rm -rf /comfyui/models/SEEDVR2 && \
+    ln -sf /runpod-volume/models/SEEDVR2 /comfyui/models/SEEDVR2
 
 # —— Custom handler with video output support ————————————————————————————————
 COPY rp_handler.py /rp_handler.py
