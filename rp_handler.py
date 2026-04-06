@@ -57,8 +57,12 @@ def queue_prompt(prompt, client_id):
         data=payload,
         headers={"Content-Type": "application/json"},
     )
-    response = urllib.request.urlopen(req)
-    return json.loads(response.read())
+    try:
+        response = urllib.request.urlopen(req)
+        return json.loads(response.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ComfyUI prompt rejected ({e.code}): {error_body}")
 
 
 def get_history(prompt_id):
